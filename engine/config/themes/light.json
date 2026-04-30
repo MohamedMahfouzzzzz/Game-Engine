@@ -1,0 +1,28 @@
+{
+  "name": "light",
+  "colors": {
+    "background": "#f5f5f5",
+    "background_secondary": "#ffffff",
+    "foreground": "#212121",
+    "foreground_secondary": "#757575",
+    "accent": "#2196f3",
+    "accent_hover": "#1976d2",
+    "accent_pressed": "#0d47a1",
+    "grid": "#e0e0e0",
+    "grid_major": "#bdbdbd",
+    "selection": "#00bcd4",
+    "selection_bg": "rgba(0, 188, 212, 0.2)",
+    "error": "#f44336",
+    "warning": "#ff9800",
+    "success": "#4caf50",
+    "info": "#2196f3"
+  },
+  "syntax": {
+    "keyword": "#7c4dff",
+    "string": "#689f38",
+    "comment": "#9e9e9e",
+    "number": "#ff6e40",
+    "function": "#2979ff",
+    "variable": "#e91e63"
+  }
+}

@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "game-engine-studio"
+version = "0.2.0"
+description = "Modular 2D game engine studio"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: long-running performance or load tests",
+    "benchmark: benchmark-style tests with optional pytest-benchmark support",
+]

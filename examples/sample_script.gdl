@@ -1,0 +1,137 @@
+# GDLang Sample Script - GDScript Compatible
+# Game Engine Studio Native Scripting
+
+class Player extends Node2D:
+    
+    @export var speed: int = 200
+    @export var health: int = 100
+    @export var max_health: int = 100
+    
+    @onready var sprite = $Sprite2D
+    @onready var collision = $CollisionShape2D
+    
+    signal health_changed(new_health, old_health)
+    signal died
+    
+    const DAMAGE_COOLDOWN = 0.5
+    
+    enum State {IDLE, WALKING, ATTACKING, HURT, DEAD}
+    
+    var state = State.IDLE
+    var velocity = Vector2()
+    var facing_right = true
+    var invulnerable = false
+    
+    func _ready():
+        health = max_health
+        print("Player ready! Health: ", health)
+    
+    func _process(delta):
+        match state:
+            State.IDLE:
+                _handle_idle(delta)
+            State.WALKING:
+                _handle_walking(delta)
+            State.ATTACKING:
+                _handle_attacking(delta)
+    
+    func _physics_process(delta):
+        var input_dir = Vector2()
+        
+        if Input.is_action_pressed("move_right"):
+            input_dir.x += 1
+            facing_right = true
+        if Input.is_action_pressed("move_left"):
+            input_dir.x -= 1
+            facing_right = false
+        if Input.is_action_pressed("move_up"):
+            input_dir.y -= 1
+        if Input.is_action_pressed("move_down"):
+            input_dir.y += 1
+        
+        velocity = input_dir.normalized() * speed
+        position += velocity * delta
+        
+        # Flip sprite based on direction
+        if sprite:
+            sprite.flip_h = not facing_right
+    
+    func _handle_idle(delta):
+        if velocity.length() > 0:
+            state = State.WALKING
+            if sprite:
+                sprite.play("walk")
+    
+    func _handle_walking(delta):
+        if velocity.length() == 0:
+            state = State.IDLE
+            if sprite:
+                sprite.play("idle")
+    
+    func _handle_attacking(delta):
+        pass
+    
+    func take_damage(amount: int):
+        if invulnerable or state == State.DEAD:
+            return
+        
+        var old_health = health
+        health = max(0, health - amount)
+        
+        emit_signal("health_changed", health, old_health)
+        
+        if health <= 0:
+            _die()
+        else:
+            state = State.HURT
+            invulnerable = true
+            # await get_tree().create_timer(DAMAGE_COOLDOWN).timeout
+            invulnerable = false
+            state = State.IDLE
+    
+    func heal(amount: int):
+        var old_health = health
+        health = min(max_health, health + amount)
+        emit_signal("health_changed", health, old_health)
+    
+    func _die():
+        state = State.DEAD
+        emit_signal("died")
+        if sprite:
+            sprite.play("death")
+    
+    func get_health_percentage() -> float:
+        return float(health) / float(max_health) * 100.0
+
+
+class Enemy extends Node2D:
+    
+    @export var damage: int = 10
+    @export var detection_range: float = 200.0
+    
+    var player: Node = null
+    var home_position = Vector2()
+    
+    func _ready():
+        home_position = position
+    
+    func _process(delta):
+        if player:
+            var distance = position.distance_to(player.position)
+            if distance < detection_range:
+                _chase_player(delta)
+            else:
+                _return_home(delta)
+    
+    func _chase_player(delta):
+        var direction = (player.position - position).normalized()
+        position += direction * speed * delta
+    
+    func _return_home(delta):
+        if position.distance_to(home_position) > 10:
+            var direction = (home_position - position).normalized()
+            position += direction * speed * delta
+    
+    func _on_attack_area_body_entered(body):
+        if body.has_method("take_damage"):
+            body.take_damage(damage)

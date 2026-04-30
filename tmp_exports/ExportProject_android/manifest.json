@@ -1,0 +1,9 @@
+{
+  "project": "ExportProject",
+  "target": "android",
+  "output_name": "ExportProject_android",
+  "assets_optimized": true,
+  "bundle_dir": "C:\\Users\\anasg\\Downloads\\game_engine_studio\\tmp_exports\\ExportProject_android",
+  "runtime_entry": "C:\\Users\\anasg\\Downloads\\game_engine_studio\\tmp_exports\\ExportProject_android\\runtime\\run_game.py",
+  "created_at_utc": "2026-04-29T19:12:22.361641+00:00"
+}

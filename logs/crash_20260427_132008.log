@@ -1,0 +1,28 @@
+========================================================================
+  GAME ENGINE STUDIO — CRASH REPORT
+  Timestamp : 2026-04-27T13:20:08.942054+00:00
+  Reason    : unhandled_exception
+========================================================================
+
+[ System Info ]
+  OS: Windows-11-10.0.26200-SP0
+  Python: 3.13.13 (tags/v3.13.13:01104ce, Apr  7 2026, 19:25:48) [MSC v.1944 64 bit (AMD64)]
+  Executable: C:\Users\anasg\AppData\Local\Python\pythoncore-3.13-64\python.exe
+  CWD: C:\Users\anasg\Downloads\game_engine_studio
+
+[ Details ]
+Traceback (most recent call last):
+  File "C:\Users\anasg\Downloads\game_engine_studio\ui\main_window.py", line 474, in open_pixel_editor
+    editor = PixelArtEditor(width=64, height=64)
+  File "C:\Users\anasg\Downloads\game_engine_studio\engine\tools\pixel_art_editor\main_editor.py", line 42, in __init__
+    self._script_api = AsepriteAPI()
+                       ~~~~~~~~~~~^^
+  File "C:\Users\anasg\Downloads\game_engine_studio\engine\tools\pixel_art_editor\scripting\api\lua_wrapper.py", line 122, in __init__
+    self.app = self._create_app()
+               ~~~~~~~~~~~~~~~~^^
+  File "C:\Users\anasg\Downloads\game_engine_studio\engine\tools\pixel_art_editor\scripting\api\lua_wrapper.py", line 128, in _create_app
+    return App()
+  File "C:\Users\anasg\Downloads\game_engine_studio\engine\tools\pixel_art_editor\scripting\api\app.py", line 92, in __init__
+    from .utils import PixelColor, Site, Version, Clipboard
+ImportError: cannot import name 'Clipboard' from 'engine.tools.pixel_art_editor.scripting.api.utils' (C:\Users\anasg\Downloads\game_engine_studio\engine\tools\pixel_art_editor\scripting\api\utils.py)
+

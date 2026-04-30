@@ -1,0 +1,37 @@
+{
+  "project": {
+    "id": "5fdd64a8313227ccfb64ff5bdf9a8ac5",
+    "name": "NewGame",
+    "version": 2,
+    "scenes": {
+      "c41395cf-545d-4a67-9a7a-7f36e40e7571": {
+        "id": "c41395cf-545d-4a67-9a7a-7f36e40e7571",
+        "name": "MainScene",
+        "root": {
+          "uid": "GE-NOD-69ef627c-4376fc",
+          "name": "MainSceneRoot",
+          "type": "Node",
+          "enabled": true,
+          "visible": true,
+          "script": null,
+          "properties": {},
+          "children": []
+        },
+        "instances": []
+      }
+    },
+    "active_scene_id": "c41395cf-545d-4a67-9a7a-7f36e40e7571",
+    "assets": {},
+    "resources": {},
+    "metadata": {
+      "created_at": 26426.6860937,
+      "modified_at": 26439.2781309,
+      "author": "Unknown",
+      "checksum": ""
+    }
+  },
+  "last_project_path": "C:/Users/anasg/Downloads/NewGame\\NewGame\\NewGame.Game",
+  "recent_projects": [
+    "C:/Users/anasg/Downloads/NewGame\\NewGame\\NewGame.Game"
+  ]
+}

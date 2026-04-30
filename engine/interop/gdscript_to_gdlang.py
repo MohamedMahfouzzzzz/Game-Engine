@@ -1,0 +1,440 @@
+# /**************************************************************************/
+# /*  gdscript_to_gdlang.py                                                 */
+# /**************************************************************************/
+# /*                         This file is part of:                          */
+# /*                             GAME ENGINE                                */
+# /**************************************************************************/
+
+"""GDScript to GDLang converter.
+
+Converts GDScript files to GDLang format for native engine execution.
+This is essentially a syntax normalizer - GDLang is designed to be
+GDScript-compatible with minor adaptations for the engine.
+"""
+
+import re
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Set
+from dataclasses import dataclass
+
+
+@dataclass
+class ConversionResult:
+    """Result of GDScript to GDLang conversion."""
+    code: str
+    errors: List[str]
+    warnings: List[str]
+    class_name: str
+    extends: str
+    
+
+class GDScriptToGDLangConverter:
+    """Converts GDScript code to GDLang format.
+    
+    GDLang is the engine's native scripting language, designed to be
+    largely compatible with GDScript syntax while running on the
+    engine's custom VM.
+    """
+    
+    def __init__(self):
+        self.errors: List[str] = []
+        self.warnings: List[str] = []
+        self.conversions = 0
+        
+        # GDScript built-in types mapping to GDLang types
+        self.type_mapping: Dict[str, str] = {
+            'bool': 'bool',
+            'int': 'int',
+            'float': 'float',
+            'String': 'str',
+            'Vector2': 'Vector2',
+            'Vector2i': 'Vector2i',
+            'Rect2': 'Rect2',
+            'Rect2i': 'Rect2i',
+            'Color': 'Color',
+            'Transform2D': 'Transform2D',
+            'Array': 'Array',
+            'Dictionary': 'Dict',
+            'PackedByteArray': 'PackedByteArray',
+            'PackedInt32Array': 'PackedInt32Array',
+            'PackedInt64Array': 'PackedInt64Array',
+            'PackedFloat32Array': 'PackedFloat32Array',
+            'PackedFloat64Array': 'PackedFloat64Array',
+            'PackedStringArray': 'PackedStringArray',
+            'PackedVector2Array': 'PackedVector2Array',
+            'PackedColorArray': 'PackedColorArray',
+            'NodePath': 'NodePath',
+            'StringName': 'StringName',
+            'RID': 'RID',
+            'Object': 'Object',
+            'Callable': 'Callable',
+            'Signal': 'Signal',
+        }
+        
+        # Node type mapping for extends
+        self.node_types: Dict[str, str] = {
+            'Node': 'Node',
+            'Node2D': 'Node2D',
+            'Node3D': 'Node3D',
+            'Control': 'Control',
+            'Area2D': 'Area2D',
+            'RigidBody2D': 'RigidBody2D',
+            'CharacterBody2D': 'CharacterBody2D',
+            'StaticBody2D': 'StaticBody2D',
+            'AnimatedSprite2D': 'AnimatedSprite2D',
+            'Sprite2D': 'Sprite2D',
+            'CollisionShape2D': 'CollisionShape2D',
+            'Camera2D': 'Camera2D',
+            'TileMap': 'TileMap',
+            'TileMapLayer': 'TileMapLayer',
+        }
+    
+    def convert_file(self, gd_path: str) -> Optional[ConversionResult]:
+        """Convert a .gd file to GDLang.
+        
+        Args:
+            gd_path: Path to GDScript file
+            
+        Returns:
+            ConversionResult with GDLang code and any issues
+        """
+        path = Path(gd_path)
+        if not path.exists():
+            self.errors.append(f"File not found: {gd_path}")
+            return None
+        
+        try:
+            gd_code = path.read_text(encoding='utf-8')
+            result = self.convert_code(gd_code, path.stem)
+            result.errors.extend(self.errors)
+            result.warnings.extend(self.warnings)
+            return result
+        except Exception as e:
+            self.errors.append(f"Error reading {gd_path}: {e}")
+            return None
+    
+    def convert_code(self, gd_code: str, class_name: str = "Script") -> ConversionResult:
+        """Convert GDScript code to GDLang format.
+        
+        Args:
+            gd_code: Raw GDScript source code
+            class_name: Name for the generated class
+            
+        Returns:
+            ConversionResult with GDLang code
+        """
+        self.errors = []
+        self.warnings = []
+        self.conversions += 1
+        
+        # Split into lines for processing
+        lines = gd_code.split('\n')
+        
+        # Extract class information
+        class_info = self._extract_class_info(lines)
+        if class_info['name']:
+            class_name = class_info['name']
+        
+        # Build GDLang output
+        gdlang_lines: List[str] = []
+        
+        # Add header comment
+        gdlang_lines.append(f'# Converted from GDScript: {class_name}')
+        gdlang_lines.append('# Auto-generated by Game Engine Studio')
+        gdlang_lines.append('')
+        
+        # Add class declaration
+        extends_type = class_info.get('extends', 'Node')
+        gdlang_lines.append(f'class {class_name} extends {extends_type}:')
+        gdlang_lines.append('')
+        
+        # Process body lines
+        in_class_body = False
+        indent_level = 0
+        
+        for line in lines:
+            stripped = line.strip()
+            
+            # Skip class declaration line (already handled)
+            if stripped.startswith('class_name') or stripped.startswith('extends'):
+                continue
+            
+            # Skip blank lines in class body but preserve indentation
+            if not stripped:
+                if in_class_body:
+                    gdlang_lines.append('')
+                continue
+            
+            # Process the line
+            processed = self._process_line(line, indent_level)
+            if processed is not None:
+                gdlang_lines.append(processed)
+                in_class_body = True
+        
+        # Clean up extra blank lines
+        gdlang_code = self._cleanup_code('\n'.join(gdlang_lines))
+        
+        return ConversionResult(
+            code=gdlang_code,
+            errors=self.errors,
+            warnings=self.warnings,
+            class_name=class_name,
+            extends=extends_type
+        )
+    
+    def _extract_class_info(self, lines: List[str]) -> Dict[str, str]:
+        """Extract class name and extends from GDScript."""
+        info = {'name': None, 'extends': 'Node'}
+        
+        for line in lines:
+            stripped = line.strip()
+            
+            # class_name MyClass
+            match = re.match(r'class_name\s+(\w+)', stripped)
+            if match:
+                info['name'] = match.group(1)
+            
+            # extends BaseClass
+            match = re.match(r'extends\s+(\w+)', stripped)
+            if match:
+                info['extends'] = match.group(1)
+            
+            # class MyClass extends BaseClass:
+            match = re.match(r'class\s+(\w+)(?:\s+extends\s+(\w+))?', stripped)
+            if match:
+                info['name'] = match.group(1)
+                if match.group(2):
+                    info['extends'] = match.group(2)
+        
+        return info
+    
+    def _process_line(self, line: str, base_indent: int) -> Optional[str]:
+        """Process a single line of GDScript."""
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        
+        # Handle GDScript-specific features
+        processed = stripped
+        
+        # @onready var -> @onready var (keep as-is for GDLang)
+        if '@onready' in processed:
+            processed = self._convert_onready(processed)
+        
+        # @export var -> @export var (keep as-is)
+        elif '@export' in processed:
+            processed = self._convert_export(processed)
+        
+        # @export_group -> @export_group
+        elif '@export_group' in processed:
+            processed = self._convert_export_group(processed)
+        
+        # @export_subgroup -> @export_subgroup
+        elif '@export_subgroup' in processed:
+            processed = self._convert_export_subgroup(processed)
+        
+        # @rpc -> @rpc
+        elif '@rpc' in processed:
+            processed = self._convert_rpc(processed)
+        
+        # Signal declaration
+        elif stripped.startswith('signal'):
+            processed = self._convert_signal(stripped)
+        
+        # const VAR_NAME = value -> const VAR_NAME = value
+        elif stripped.startswith('const '):
+            processed = self._convert_const(stripped)
+        
+        # enum -> enum (GDLang supports GDScript enums)
+        elif stripped.startswith('enum'):
+            processed = self._convert_enum(stripped)
+        
+        # $NodePath -> get_node("NodePath") or $NodePath (keep $ syntax)
+        processed = self._convert_node_shortcuts(processed)
+        
+        # %UniqueNode -> get_node("%UniqueNode")
+        processed = self._convert_unique_nodes(processed)
+        
+        # String interpolation "Hello {name}" -> "Hello {name}" (GDLang supports)
+        processed = self._convert_string_interpolation(processed)
+        
+        # Match statement -> match statement (GDLang supports pattern matching)
+        processed = self._convert_match(processed)
+        
+        # Lambda functions (Godot 4.x)
+        processed = self._convert_lambda(processed)
+        
+        # await -> await (GDLang supports async/await)
+        processed = self._convert_await(processed)
+        
+        # Preload -> preload (GDLang supports)
+        processed = self._convert_preload(processed)
+        
+        # is_instance_of() -> is_instance_of (GDLang supports)
+        processed = self._convert_type_checks(processed)
+        
+        # Preserve indentation
+        if processed:
+            return ' ' * indent + processed
+        return None
+    
+    def _convert_onready(self, line: str) -> str:
+        """Convert @onready annotation."""
+        # @onready var x = value -> @onready var x = value (GDLang supports)
+        return line
+    
+    def _convert_export(self, line: str) -> str:
+        """Convert @export annotation with type."""
+        # @export var health: int = 100 -> @export var health: int = 100
+        # GDLang preserves GDScript export syntax
+        return line
+    
+    def _convert_export_group(self, line: str) -> str:
+        """Convert @export_group."""
+        # @export_group("Stats") -> @export_group("Stats")
+        return line
+    
+    def _convert_export_subgroup(self, line: str) -> str:
+        """Convert @export_subgroup."""
+        return line
+    
+    def _convert_rpc(self, line: str) -> str:
+        """Convert @rpc annotation."""
+        # @rpc -> @rpc
+        # @rpc("any_peer", "call_remote", "reliable") -> @rpc(...)
+        return line
+    
+    def _convert_signal(self, line: str) -> str:
+        """Convert signal declaration."""
+        # signal health_changed(new_health, old_health)
+        # -> signal health_changed(new_health, old_health)
+        return line
+    
+    def _convert_const(self, line: str) -> str:
+        """Convert const declaration."""
+        # const MAX_HEALTH = 100 -> const MAX_HEALTH = 100
+        # GDLang preserves GDScript const syntax
+        return line
+    
+    def _convert_enum(self, line: str) -> str:
+        """Convert enum declaration."""
+        # enum State {IDLE, WALKING, RUNNING}
+        # -> enum State {IDLE, WALKING, RUNNING}
+        return line
+    
+    def _convert_node_shortcuts(self, line: str) -> str:
+        """Convert $NodePath shortcuts."""
+        # Keep $ syntax as-is - GDLang supports it
+        # $Player/Sprite -> $Player/Sprite
+        return line
+    
+    def _convert_unique_nodes(self, line: str) -> str:
+        """Convert %UniqueNode syntax."""
+        # %HealthBar -> %HealthBar (GDLang supports)
+        return line
+    
+    def _convert_string_interpolation(self, line: str) -> str:
+        """Convert GDScript string interpolation."""
+        # "Health: {health}" -> "Health: {health}" (GDLang supports)
+        return line
+    
+    def _convert_match(self, line: str) -> str:
+        """Convert match statement."""
+        # GDLang supports match statements natively
+        return line
+    
+    def _convert_lambda(self, line: str) -> str:
+        """Convert lambda functions."""
+        # func(x): return x * 2 -> func(x): return x * 2
+        return line
+    
+    def _convert_await(self, line: str) -> str:
+        """Convert await keyword."""
+        # await get_tree().create_timer(1.0).timeout -> await ...
+        return line
+    
+    def _convert_preload(self, line: str) -> str:
+        """Convert preload()."""
+        # preload("res://path.gd") -> preload("res://path.gd")
+        return line
+    
+    def _convert_type_checks(self, line: str) -> str:
+        """Convert type check functions."""
+        # is_instance_of(obj, Type) -> is_instance_of(obj, Type)
+        return line
+    
+    def _cleanup_code(self, code: str) -> str:
+        """Clean up the generated GDLang code."""
+        # Remove consecutive blank lines
+        lines = code.split('\n')
+        result = []
+        prev_blank = False
+        
+        for line in lines:
+            is_blank = not line.strip()
+            if is_blank and prev_blank:
+                continue
+            result.append(line)
+            prev_blank = is_blank
+        
+        return '\n'.join(result)
+    
+    def get_stats(self) -> Dict[str, int]:
+        """Get conversion statistics."""
+        return {
+            'conversions': self.conversions,
+            'errors': len(self.errors),
+            'warnings': len(self.warnings),
+        }
+
+
+def convert_gdscript_file(input_path: str, output_path: Optional[str] = None) -> bool:
+    """Convert a GDScript file to GDLang.
+    
+    Args:
+        input_path: Path to .gd file
+        output_path: Optional output path for .gdl file
+        
+    Returns:
+        True if successful
+    """
+    converter = GDScriptToGDLangConverter()
+    result = converter.convert_file(input_path)
+    
+    if result is None:
+        print(f"Failed to convert {input_path}")
+        for error in converter.errors:
+            print(f"  Error: {error}")
+        return False
+    
+    # Determine output path
+    if output_path is None:
+        input_p = Path(input_path)
+        output_path = str(input_p.with_suffix('.gdl'))
+    
+    # Write output
+    try:
+        Path(output_path).write_text(result.code, encoding='utf-8')
+        print(f"Converted: {input_path} -> {output_path}")
+        
+        if result.warnings:
+            for warning in result.warnings:
+                print(f"  Warning: {warning}")
+        
+        return True
+    except Exception as e:
+        print(f"Failed to write {output_path}: {e}")
+        return False
+
+
+if __name__ == "__main__":
+    import sys
+    
+    if len(sys.argv) < 2:
+        print("Usage: python gdscript_to_gdlang.py <input.gd> [output.gdl]")
+        sys.exit(1)
+    
+    input_file = sys.argv[1]
+    output_file = sys.argv[2] if len(sys.argv) > 2 else None
+    
+    success = convert_gdscript_file(input_file, output_file)
+    sys.exit(0 if success else 1)

@@ -1,0 +1,9 @@
+{
+  "project": "ExportProject",
+  "target": "windows",
+  "output_name": "ExportProject_windows",
+  "assets_optimized": true,
+  "bundle_dir": "C:\\Users\\anasg\\Downloads\\game_engine_studio\\tmp_exports\\ExportProject_windows",
+  "runtime_entry": "C:\\Users\\anasg\\Downloads\\game_engine_studio\\tmp_exports\\ExportProject_windows\\runtime\\run_game.py",
+  "created_at_utc": "2026-04-29T19:12:22.232889+00:00"
+}

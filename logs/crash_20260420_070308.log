@@ -1,0 +1,19 @@
+========================================================================
+  GAME ENGINE STUDIO — CRASH REPORT
+  Timestamp : 2026-04-20T07:03:08.918903+00:00
+  Reason    : unhandled_exception
+========================================================================
+
+[ System Info ]
+  OS: Windows-11-10.0.26200-SP0
+  Python: 3.13.13 (tags/v3.13.13:01104ce, Apr  7 2026, 19:25:48) [MSC v.1944 64 bit (AMD64)]
+  Executable: C:\Users\anasg\AppData\Local\Python\pythoncore-3.13-64\python.exe
+  CWD: C:\Users\anasg\Downloads\game_engine_studio
+
+[ Details ]
+Traceback (most recent call last):
+  File "C:\Users\anasg\Downloads\game_engine_studio\engine\tools\pixel_art_editor\main_editor.py", line 337, in _run_lua_script
+    self._last_script_path = str(Path(path).parent)
+                                 ^^^^
+NameError: name 'Path' is not defined. Did you mean: 'path'?
+

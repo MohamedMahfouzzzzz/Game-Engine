@@ -1,0 +1,40 @@
+{
+  "version": "1.0.0",
+  "key_bindings": {
+    "new_project": "Ctrl+N",
+    "open_project": "Ctrl+O",
+    "save_project": "Ctrl+S",
+    "undo": "Ctrl+Z",
+    "redo": "Ctrl+Y",
+    "play": "F5",
+    "pause": "F6",
+    "stop": "F7",
+    "delete": "Delete",
+    "duplicate": "Ctrl+D"
+  },
+  "theme": {
+    "name": "dark",
+    "accent_color": "#00bcd4",
+    "background_color": "#2a2a2a",
+    "foreground_color": "#ffffff",
+    "grid_color": "#505050",
+    "selection_color": "#00ffff"
+  },
+  "editor": {
+    "auto_save": true,
+    "auto_save_interval": 300,
+    "show_grid": true,
+    "grid_size": 32,
+    "snap_to_grid": false,
+    "default_zoom": 1.0,
+    "max_console_lines": 10000,
+    "show_gizmos": true
+  },
+  "runtime": {
+    "target_fps": 60,
+    "vsync": true,
+    "fixed_timestep": true,
+    "max_physics_steps": 8
+  },
+  "custom": {}
+}
