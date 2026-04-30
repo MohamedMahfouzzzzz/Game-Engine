@@ -13,6 +13,15 @@ Core node hierarchy for the 2-D game engine.
 
 All nodes receive a collision-resistant UID from the global
 :mod:`engine.core.uid_registry` the moment they are constructed.
+
+Godot 4.6 parity additions
+---------------------------
+* ``unique_name``  — optional pin that lets you address this node via
+  ``%UniqueName`` syntax in scene paths, stable across renames/reparents.
+* ``get_node(path)`` — scene-path resolver supporting ``%UniqueName`` shortcut,
+  absolute paths (leading ``/``), and relative dot-notation (``../Sibling``).
+* ``find_node_by_uid(uid)`` — O(1) lookup delegated to the global registry.
+* ``_SIGNALS`` list accepted by SignalBus for forward-declared signals.
 """
 
 from __future__ import annotations
@@ -29,71 +38,85 @@ from engine.core.types import NodeType
 from engine.core.uid_registry import generate_uid, get_registry
 
 
-# ---------------------------------------------------------------------------
-# Base Node
-# ---------------------------------------------------------------------------
-
 class Node:
-    """Base node with properties, children, and a weak-ref signal bus.
-
-    Uses __slots__ for ~40% memory reduction and faster attribute access.
-    Prevents arbitrary attribute creation, enforcing clean architecture.
-
-    Attributes:
-        uid:        Unique identifier (``GE-NOD-…``).
-        name:       Human-readable label shown in the scene tree.
-        node_type:  :class:`~engine.core.types.NodeType` enum value.
-        parent:     Direct parent node (``None`` for root nodes).
-        children:   Ordered list of child nodes.
-        properties: Arbitrary key/value bag for runtime data.
-        enabled:    When ``False`` the node is skipped during processing.
-        visible:    When ``False`` the node is not rendered.
-        script:     Path or source of the script attached to this node.
-        signals:    :class:`~engine.core.signals.SignalBus` instance.
-    """
-
-    # __slots__ reduces memory by eliminating __dict__ and improves cache locality
-    # __weakref__ is required for UID registry to create weak references
     __slots__ = [
-        "uid", "name", "node_type", "parent", "children",
+        "uid", "name", "unique_name", "node_type", "parent", "children",
         "properties", "enabled", "processing", "visible", "script", "signals",
-        "_child_by_name", "_tree_version", "_sort_dirty",
+        "_child_by_name", "_tree_version", "_sort_dirty", "_scene_root",
         "__weakref__"
     ]
 
-    # Class-level list of signal names declared by this type (GDScript-style)
     _SIGNALS: List[str] = []
 
-    def __init__(
-        self,
-        name: str = "Node",
-        node_type: NodeType = NodeType.NODE,
-    ) -> None:
+    def __init__(self, name: str = "Node", node_type: NodeType = NodeType.NODE) -> None:
         self.uid: str = generate_uid(node_type.value)
         self.name: str = name
+        self.unique_name: Optional[str] = None
         self.node_type: NodeType = node_type
         self.parent: Optional["Node"] = None
         self.children: List["Node"] = []
         self._child_by_name: Dict[str, List["Node"]] = {}
         self._tree_version: int = 0
         self._sort_dirty: bool = True
+        self._scene_root: Optional["Node"] = None
         self.properties: Dict[str, Any] = {}
         self.enabled: bool = True
         self.processing: bool = True
         self.visible: bool = True
         self.script: Optional[str] = None
         self.signals: SignalBus = SignalBus()
-
-        # Register with the global UID registry (weak ref — no ownership)
         get_registry().register(self.uid, self)
         logger.debug("Node '%s' created with uid %s", name, self.uid)
 
-    # ------------------------------------------------------------------
-    # Tree management
-    # ------------------------------------------------------------------
+    def set_unique_name(self, unique_name: Optional[str]) -> None:
+        old = self.unique_name
+        self.unique_name = unique_name
+        reg = get_registry()
+        if old:
+            reg.unregister_unique_name(old)
+        if unique_name:
+            reg.register_unique_name(unique_name, self)
+
+    def get_node(self, path: str) -> Optional["Node"]:
+        if not path:
+            return self
+        if path.startswith("%"):
+            rest_parts = path[1:].split("/", 1)
+            alias = rest_parts[0]
+            node = get_registry().lookup_unique_name(alias)
+            if node is None:
+                return None
+            if len(rest_parts) == 2:
+                return node.get_node(rest_parts[1])
+            return node
+        if path.startswith("/"):
+            root = self._get_tree_root()
+            return root.get_node(path.lstrip("/")) if root else None
+        parts = path.split("/")
+        current: Optional["Node"] = self
+        for part in parts:
+            if current is None:
+                return None
+            if part == ".":
+                continue
+            elif part == "..":
+                current = current.parent
+            else:
+                current = current.get_child(part)
+        return current
+
+    def _get_tree_root(self) -> Optional["Node"]:
+        node: Optional["Node"] = self
+        while node is not None and node.parent is not None:
+            node = node.parent
+        return node
+
+    @staticmethod
+    def find_node_by_uid(uid: str) -> Optional["Node"]:
+        obj = get_registry().lookup(uid)
+        return obj if isinstance(obj, Node) else None
 
     def add_child(self, child: "Node") -> None:
-        """Attach *child* to this node.  Reparents if already attached elsewhere."""
         if child is self:
             raise ValueError("A node cannot be parented to itself")
         ancestor: Optional["Node"] = self
@@ -104,6 +127,7 @@ class Node:
         if child.parent is not None:
             child.parent.remove_child(child)
         child.parent = self
+        child._scene_root = self._scene_root or (self if self.parent is None else None)
         self.children.append(child)
         self._child_by_name.setdefault(child.name, []).append(child)
         self._tree_version += 1
@@ -111,7 +135,6 @@ class Node:
         logger.debug("Node '%s' added as child to '%s'", child.name, self.name)
 
     def remove_child(self, child: "Node") -> None:
-        """Detach *child* from this node."""
         if child in self.children:
             self.children.remove(child)
             bucket = self._child_by_name.get(child.name)
@@ -120,6 +143,7 @@ class Node:
                 if not bucket:
                     self._child_by_name.pop(child.name, None)
             child.parent = None
+            child._scene_root = None
             child.signals.disconnect_all()
             self._tree_version += 1
             self._sort_dirty = True
@@ -131,12 +155,10 @@ class Node:
             logger.debug("Node '%s' removed from parent '%s'", child.name, self.name)
 
     def get_child(self, name: str, default: Optional["Node"] = None) -> Optional["Node"]:
-        """Return the first direct child with *name* in O(1) average time."""
         bucket = self._child_by_name.get(name)
         return bucket[0] if bucket else default
 
     def find_child(self, name: str, recursive: bool = True) -> Optional["Node"]:
-        """Return the first child whose :attr:`name` matches, or ``None``."""
         for child in self.children:
             if child.name == name:
                 return child
@@ -147,7 +169,6 @@ class Node:
         return None
 
     def get_path(self) -> str:
-        """Return the node's scene-tree path, e.g. ``"Root/Player/Sprite"``."""
         parts: List[str] = [self.name]
         node: Optional["Node"] = self.parent
         while node is not None:
@@ -156,12 +177,7 @@ class Node:
         return "/".join(reversed(parts))
 
     def iter_children(self, recursive: bool = False) -> "NodeIterator":
-        """Iterate over children (and optionally all descendants)."""
         return NodeIterator(self, recursive=recursive)
-
-    # ------------------------------------------------------------------
-    # Property helpers
-    # ------------------------------------------------------------------
 
     def set_property(self, key: str, value: Any) -> None:
         self.properties[key] = value
@@ -172,10 +188,6 @@ class Node:
     def has_property(self, key: str) -> bool:
         return key in self.properties
 
-    # ------------------------------------------------------------------
-    # Signal helpers (thin wrappers for ergonomic call-site code)
-    # ------------------------------------------------------------------
-
     def connect(self, signal: str, callback: Any) -> None:
         self.signals.connect(signal, callback)
 
@@ -185,20 +197,17 @@ class Node:
     def emit(self, signal: str, *args: Any, **kwargs: Any) -> None:
         self.signals.emit(signal, *args, **kwargs)
 
-    # ------------------------------------------------------------------
-    # Serialisation
-    # ------------------------------------------------------------------
-
     def _to_dict_base(self) -> Dict[str, Any]:
         return {
-            "uid":        self.uid,
-            "name":       self.name,
-            "type":       self.node_type.value,
-            "enabled":    self.enabled,
-            "visible":    self.visible,
-            "script":     self.script,
-            "properties": self.properties,
-            "children":   [child.to_dict() for child in self.children],
+            "uid":         self.uid,
+            "name":        self.name,
+            "unique_name": self.unique_name,
+            "type":        self.node_type.value,
+            "enabled":     self.enabled,
+            "visible":     self.visible,
+            "script":      self.script,
+            "properties":  self.properties,
+            "children":    [child.to_dict() for child in self.children],
         }
 
     def to_dict(self) -> Dict[str, Any]:
@@ -211,76 +220,54 @@ class Node:
             node_type = NodeType(node_type_val)
         except ValueError:
             node_type = NodeType.NODE
-
         if node_type == NodeType.NODE2D:
             node: Node = Node2D(data.get("name", "Node2D"))
         else:
             node = Node(data.get("name", "Node"), node_type)
-
-        # Restore UID (but don't re-generate)
         saved_uid = data.get("uid")
         if saved_uid:
             node.uid = saved_uid
             get_registry().register(saved_uid, node)
-
         node.enabled    = data.get("enabled", True)
         node.visible    = data.get("visible", True)
         node.script     = data.get("script")
         node.properties = data.get("properties", {})
-
+        saved_unique = data.get("unique_name")
+        if saved_unique:
+            node.set_unique_name(saved_unique)
         if isinstance(node, Node2D):
             td = data.get("transform", {})
             node.transform.position = tuple(td.get("position", (0.0, 0.0)))  # type: ignore[assignment]
             node.transform.rotation = float(td.get("rotation", 0.0))
             node.transform.scale    = tuple(td.get("scale", (1.0, 1.0)))     # type: ignore[assignment]
-            node.z_index   = int(data.get("z_index", 0))
-            node.modulate  = tuple(data.get("modulate", (255, 255, 255, 255)))  # type: ignore[assignment]
-            node.y_sort_enabled = bool(data.get("y_sort_enabled", False))
-
+            node.z_index            = int(data.get("z_index", 0))
+            node.modulate           = tuple(data.get("modulate", (255, 255, 255, 255)))  # type: ignore[assignment]
+            node.y_sort_enabled     = bool(data.get("y_sort_enabled", False))
         for child_data in data.get("children", []):
             node.add_child(Node.from_dict(child_data))
-
         return node
 
-    # ------------------------------------------------------------------
-    # Object Pooling Support
-    # ------------------------------------------------------------------
-
     def _reset(self) -> None:
-        """Reset node state for reuse from object pool.
-        
-        Called when acquiring from pool. Generates new UID and clears state.
-        """
-        # Clear children
+        if self.unique_name:
+            get_registry().unregister_unique_name(self.unique_name)
+            self.unique_name = None
         self.children.clear()
         self._child_by_name.clear()
         self._tree_version += 1
         self._sort_dirty = True
-        
-        # Clear properties
         self.properties.clear()
-        
-        # Reset state
         self.enabled = True
         self.processing = True
         self.visible = True
         self.script = None
         self.parent = None
-        
-        # Generate new UID
+        self._scene_root = None
         get_registry().unregister(self.uid)
         self.uid = generate_uid(self.node_type.value)
         get_registry().register(self.uid, self)
-        
-        # Clear signals
         self.signals.disconnect_all()
-    
+
     def _cleanup(self) -> None:
-        """Clean up node before returning to object pool.
-        
-        Called when releasing to pool. Removes from registry and clears state.
-        """
-        # Remove all children recursively
         for child in list(self.children):
             if hasattr(child, '_cleanup'):
                 child._cleanup()
@@ -288,48 +275,31 @@ class Node:
         self._child_by_name.clear()
         self._tree_version += 1
         self._sort_dirty = True
-        
-        # Clear references
         self.parent = None
+        self._scene_root = None
         self.properties.clear()
         self.script = None
-        
-        # Remove from UID registry
+        if self.unique_name:
+            get_registry().unregister_unique_name(self.unique_name)
+            self.unique_name = None
         get_registry().unregister(self.uid)
-        
-        # Disconnect all signals
         self.signals.disconnect_all()
 
-    # ------------------------------------------------------------------
-    # Cleanup
-    # ------------------------------------------------------------------
-
     def __del__(self) -> None:
-        """Release UID registration and disconnect all signals on GC."""
         try:
+            if self.unique_name:
+                get_registry().unregister_unique_name(self.unique_name)
             get_registry().release(self.uid)
             self.signals.disconnect_all()
         except Exception:
             pass
 
     def __repr__(self) -> str:
-        return f"<{self.__class__.__name__} name={self.name!r} uid={self.uid}>"
+        pin = f" %{self.unique_name}" if self.unique_name else ""
+        return f"<{self.__class__.__name__} name={self.name!r} uid={self.uid}{pin}>"
 
-
-# ---------------------------------------------------------------------------
-# Node2D
-# ---------------------------------------------------------------------------
 
 class Node2D(Node):
-    """A :class:`Node` extended with a 2-D transform, z-ordering, and tint.
-
-    Attributes:
-        transform: :class:`~engine.core.transform.Transform2D`.
-        z_index:   Draw order within the same CanvasLayer (higher = on top).
-        modulate:  RGBA tint applied to this node and its children.
-    """
-
-    # Additional slots for 2D properties
     __slots__ = ["transform", "z_index", "modulate", "y_sort_enabled"]
 
     def __init__(self, name: str = "Node2D") -> None:
@@ -338,10 +308,6 @@ class Node2D(Node):
         self.z_index: int = 0
         self.modulate: Tuple[int, int, int, int] = (255, 255, 255, 255)
         self.y_sort_enabled: bool = False
-
-    # ------------------------------------------------------------------
-    # Transform shortcuts
-    # ------------------------------------------------------------------
 
     def set_position(self, x: float, y: float) -> None:
         self.transform.position = (x, y)  # type: ignore[assignment]
@@ -405,11 +371,11 @@ class Node2D(Node):
 
     @property
     def position(self) -> Tuple[float, float]:
-        return self.get_position()
+        return self.transform.position  # type: ignore[return-value]
 
     @position.setter
     def position(self, value: Tuple[float, float]) -> None:
-        self.set_position(float(value[0]), float(value[1]))
+        self.transform.position = value  # type: ignore[assignment]
 
     @property
     def scale(self) -> Tuple[float, float]:
@@ -419,16 +385,6 @@ class Node2D(Node):
     def scale(self, value: Tuple[float, float]) -> None:
         self.set_scale(float(value[0]), float(value[1]))
 
-    @property
-    def position(self) -> Tuple[float, float]:
-        """Proxy property for transform.position for ergonomic access."""
-        return self.transform.position  # type: ignore[return-value]
-
-    @position.setter
-    def position(self, value: Tuple[float, float]) -> None:
-        """Proxy property setter for transform.position."""
-        self.transform.position = value  # type: ignore[assignment]
-
     def translate(self, dx: float, dy: float) -> None:
         x, y = self.get_position()
         self.set_position(x + dx, y + dy)
@@ -436,32 +392,17 @@ class Node2D(Node):
     def rotate(self, delta_radians: float) -> None:
         self.set_rotation(self.get_rotation() + delta_radians)
 
-    # ------------------------------------------------------------------
-    # Object Pooling Override
-    # ------------------------------------------------------------------
-
     def _reset(self) -> None:
-        """Reset including 2D properties."""
         super()._reset()
-        
-        # Reset transform
         self.transform.position = (0.0, 0.0)
         self.transform.rotation = 0.0
         self.transform.scale = (1.0, 1.0)
-        
-        # Reset other properties
         self.z_index = 0
         self.modulate = (255, 255, 255, 255)
         self.y_sort_enabled = False
-    
-    def _cleanup(self) -> None:
-        """Cleanup including 2D properties."""
-        super()._cleanup()
-        # Transform will be reset on next acquire
 
-    # ------------------------------------------------------------------
-    # Serialisation
-    # ------------------------------------------------------------------
+    def _cleanup(self) -> None:
+        super()._cleanup()
 
     def to_dict(self) -> Dict[str, Any]:
         data = self._to_dict_base()
@@ -470,19 +411,13 @@ class Node2D(Node):
             "rotation": self.transform.rotation,
             "scale":    list(self.transform.scale),
         }
-        data["z_index"]  = self.z_index
-        data["modulate"] = list(self.modulate)
-        data["y_sort_enabled"] = self.y_sort_enabled
+        data["z_index"]         = self.z_index
+        data["modulate"]        = list(self.modulate)
+        data["y_sort_enabled"]  = self.y_sort_enabled
         return data
 
 
-# ---------------------------------------------------------------------------
-# Iterator helper
-# ---------------------------------------------------------------------------
-
 class NodeIterator:
-    """Depth-first iterator over a node's subtree."""
-
     def __init__(self, root: Node, recursive: bool = False) -> None:
         self._stack: Deque[Node] = deque(root.children)
         self._recursive = recursive
